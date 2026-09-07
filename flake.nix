@@ -1,5 +1,5 @@
 {
-  description = "Cook configuration";
+  description = "LCARS configuration";
   nixConfig = {
     substituters = [
       "https://cache.nixos.org"
@@ -73,12 +73,12 @@
             home-manager.useGlobalPkgs = true;
             home-manager.useUserPackages = true;
             home-manager.extraSpecialArgs = {inherit inputs pkgs-unstable;};
-            home-manager.users.youth = {
+            home-manager.users.roland2 = {
               imports = [
                 catppuccin.homeModules.catppuccin
                 agenix.homeManagerModules.default
                 noctalia.homeModules.default
-                ./home/youth
+                ./home/roland2
               ];
               home.packages = [
                 CookNixvim.packages.${system}.default
