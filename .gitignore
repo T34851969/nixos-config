@@ -1,0 +1,8 @@
+# nix 构建产物
+result
+result-*
+
+# direnv
+.direnv/
+
+AGENTS.md

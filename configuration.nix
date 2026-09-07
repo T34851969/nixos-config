@@ -9,21 +9,18 @@
     ./modules
   ];
 
-  nix.settings.trusted-users = ["root" "youth"];
+  nix.settings.trusted-users = ["root" "roland2"];
   nixpkgs.config.allowUnfree = true;
   nix.settings.experimental-features = ["nix-command" "flakes"];
 
   environment.systemPackages = with pkgs; [
-    wineWow64Packages.stable
-    winetricks
-    google-chrome
     pulseaudio
     pciutils # lspci
     ffmpeg
     libva
     libva-utils
     power-profiles-daemon
-    vim
+    neovim
     git
     curl
     wget
@@ -40,26 +37,18 @@
     XMODIFIERS = "@im=fcitx";
   };
 
-  # NOTE: 敏感环境变量加载 (ai_api_key等)
-  age.identityPaths = [
-    "/home/youth/.ssh/id_ed25519"
-  ];
-  age.secrets."ai_api_key" = {
-    file = ./secrets/ai_api_key.age;
-    owner = "youth";
-  };
-
   programs.steam.enable = true;
   programs.steam.fontPackages = with pkgs; [source-han-sans];
   programs.zsh.enable = true;
-  users.users.youth = {
-    description = "Youth";
+  users.users.roland2 = {
+    description = "Roland2";
     isNormalUser = true;
-    home = "/home/youth";
+    home = "/home/roland2";
     shell = pkgs.zsh;
     ignoreShellProgramCheck = true;
-    hashedPassword = "$6$d89dDb.7HKl8dx2J$NP00uF4ukMaVYoWzInQxoeokT7927qybXJGzrGwe7WYd7aRNMrNVfLbgnotRDPysU0lqTrZ1L0uTu7EjXsYwg/";
-    extraGroups = ["wheel" "networkmanager" "audio" "input" "video" "docker" "kvm" "libvirtd"];
+    # 初始密码 123（SHA-512 crypt），部署后可用 passwd 更改
+    hashedPassword = "$6$RWOHg/f2qRyYgO8I$vNsH4KUKwG5otBmHVrCOblyu.PPB7rB6UCT.xxn1D1nFg7YJOoDjKqSWx4uSHM7pUCV/XKWp760wz81fvG8Md/";
+    extraGroups = ["wheel" "networkmanager" "audio" "input" "video"];
   };
   security.sudo.wheelNeedsPassword = false; # sudo组是否需要密码
 
@@ -78,20 +67,31 @@
   services.udisks2.enable = true;
 
   # networking
-  networking.hostName = "cook";
+  networking.hostName = "lcars-celeron";
   networking.networkmanager.enable = true;
-  networking.firewall.allowedTCPPorts = [
-    5900
-  ];
+  # 防火墙：默认拒绝入站，仅放行局域网段 192.168.10.0/24 与 Tailscale 的全部流量
+  networking.nftables.enable = true; # 防火墙使用 nftables 后端
+  networking.firewall = {
+    enable = true;
+    trustedInterfaces = ["tailscale0"]; # Tailscale 接口全放行
+    checkReversePath = "loose"; # strict rpfilter 会丢弃 Tailscale 的包
+    allowedUDPPorts = [41641]; # Tailscale 直连（WireGuard 传输端口）
+    extraInputRules = ''
+      ip saddr 192.168.10.0/24 accept
+    '';
+  };
+
+  services.tailscale.enable = true; # 首次部署后执行 `sudo tailscale up` 登录
 
   # Configure network proxy if necessary
-  # 系统级代理设置
-  networking.proxy = {
-    default = "http://127.0.0.1:7897";
-    httpProxy = "http://127.0.0.1:7897";
-    httpsProxy = "http://127.0.0.1:7897";
-    noProxy = "localhost,127.0.0.1,::1,*.local";
-  };
+  # 系统级代理设置：依赖本机 clash-verge 运行。
+  # 新机器首次部署、clash 订阅配置并验证可用后再取消注释，否则系统服务会因代理不可用而失败
+  # networking.proxy = {
+  #   default = "http://127.0.0.1:7897";
+  #   httpProxy = "http://127.0.0.1:7897";
+  #   httpsProxy = "http://127.0.0.1:7897";
+  #   noProxy = "localhost,127.0.0.1,::1,*.local";
+  # };
 
   # 禁用所有形式的睡眠和休眠
   systemd.sleep.extraConfig = ''
@@ -205,7 +205,8 @@
       intel-vaapi-driver
     ];
   };
-  system.stateVersion = "25.05";
+  # 全新机器安装，设为当前发行版；stateVersion 只应在首次安装时设定，已有系统请勿改动
+  system.stateVersion = "25.11";
 
   # Enable CUPS to print documents.
   # services.printing.enable = true;
@@ -221,36 +222,4 @@
   #   enableSSHSupport = true;
   # };
 
-  #### systemd user env loader ####
-  systemd.user.services.env-loader = {
-    description = "Load API keys from agenix into graphical session";
-    wantedBy = ["graphical-session-pre.target"];
-    before = ["graphical-session.target"];
-
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      ExecStart = pkgs.writeShellScript "env-loader" ''
-          SECRET_FILE="${config.age.secrets.ai_api_key.path}"
-          if [ -f "$SECRET_FILE" ]; then
-          # 1. 临时开启自动导出功能，并 source 文件
-          set -a
-          . "$SECRET_FILE"
-          set +a
-
-          # 2. 提取文件中的变量名 (匹配等号左边的字符)
-          VARS=$(grep -oP '^[a-zA-Z_][a-zA-Z0-9_]*(?==)' "$SECRET_FILE")
-
-          # 3. 将变量注入 D-Bus (解决 Rofi/GUI 应用识别问题)
-          ${pkgs.dbus}/bin/dbus-update-activation-environment --systemd $VARS
-
-          # 4. 同步到 systemd 用户环境
-          for var in $VARS; do
-            val=$(eval echo \$$var)
-            ${pkgs.systemd}/bin/systemctl --user set-environment "$var"="$val"
-          done
-        fi
-      '';
-    };
-  };
 }
